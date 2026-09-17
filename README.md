@@ -92,6 +92,9 @@ These are portfolio assumptions for illustrating decision-making under different
 SHAP is used to explain both global model behavior and individual predictions.
 
 - **Global explanation** — a representative sample of 1,000 machines is used to generate a global SHAP summary plot showing which features matter most across the dataset.
+
+![SHAP global summary plot](data/processed/shap_global_summary.png)
+
 - **Individual explanation** — for any single machine, SHAP shows how each feature pushed the model's prediction toward or away from failure (e.g., high torque or high tool wear pushing the risk up).
 
 As with feature importance, SHAP explanations describe model behavior, not physical causation.
@@ -110,11 +113,11 @@ The Streamlit app lets users enter machine operating conditions and interactivel
 
 **Prediction view** — failure probability, risk level, and the top SHAP factors behind the current prediction:
 
-![Dashboard prediction view](images/dashboard-prediction.png)
+![Dashboard prediction view](data/processed/dashboard-prediction.png)
 
 **Feature importance & dataset overview** — global model behavior alongside training data statistics:
 
-![Dashboard feature importance view](images/dashboard-feature-importance.png)
+![Dashboard feature importance view](data/processed/dashboard-feature-importance.png)
 
 Run it with:
 
