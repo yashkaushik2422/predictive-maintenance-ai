@@ -1,7 +1,7 @@
 import joblib
 import pandas as pd
 import streamlit as st
-
+import shap
 
 MODEL_PATH = "models/predictive_maintenance_model.joblib"
 DATA_PATH = "data/processed/machine_failure_data.csv"
@@ -12,6 +12,7 @@ DATA_PATH = "data/processed/machine_failure_data.csv"
 # ---------------------------------------------------------
 
 model = joblib.load(MODEL_PATH)
+explainer = shap.TreeExplainer(model)
 reference_data = pd.read_csv(DATA_PATH)
 
 
@@ -213,166 +214,152 @@ with col6:
     )
 
 # ---------------------------------------------------------
-# Dynamic operational risk indicators
+# Model-driven local explanation
 # ---------------------------------------------------------
 
 st.subheader("Why This Prediction?")
 
 st.caption(
-    "These indicators compare the current machine conditions "
-    "with patterns observed in the training data. They are "
-    "operational risk indicators, not causal explanations."
+    "These explanations show how each machine condition "
+    "contributed to the Random Forest prediction. "
+    "Positive SHAP values push the prediction toward failure, "
+    "while negative values push it toward healthy operation."
 )
 
 
-# Calculate reference statistics from the processed dataset
-healthy_data = reference_data[
-    reference_data["Machine failure"] == 0
-]
+# Build the same feature structure used during model training
+machine_data = pd.DataFrame(
+    {
+        "Air temperature [K]": [air_temperature],
+        "Process temperature [K]": [process_temperature],
+        "Rotational speed [rpm]": [rotational_speed],
+        "Torque [Nm]": [torque],
+        "Tool wear [min]": [tool_wear],
+        "Type": [machine_type],
+    }
+)
 
-risk_factors = []
+machine_data = pd.get_dummies(
+    machine_data,
+    columns=["Type"],
+    drop_first=True
+)
 
 
-# ----- Torque -----
+# Make sure the dashboard input has exactly the same
+# feature columns as the trained model
+model_features = model.feature_names_in_
 
-torque_mean = healthy_data["Torque [Nm]"].mean()
-torque_std = healthy_data["Torque [Nm]"].std()
+machine_data = machine_data.reindex(
+    columns=model_features,
+    fill_value=0
+)
 
-if torque > torque_mean + torque_std:
-    risk_factors.append(
-        (
-            "🔴",
-            "High torque",
-            f"Torque is {torque:.1f} Nm, which is noticeably "
-            f"above the typical healthy-machine level of "
-            f"{torque_mean:.1f} Nm."
-        )
-    )
-elif torque > torque_mean:
-    risk_factors.append(
-        (
-            "🟠",
-            "Elevated torque",
-            f"Torque is {torque:.1f} Nm, above the typical "
-            f"healthy-machine level of {torque_mean:.1f} Nm."
-        )
-    )
+
+# Calculate SHAP values for this machine
+machine_shap = explainer.shap_values(machine_data)
+
+if hasattr(machine_shap, "values"):
+    machine_shap_values = machine_shap.values
 else:
-    risk_factors.append(
-        (
-            "🟢",
-            "Torque within typical range",
-            f"Torque is {torque:.1f} Nm, close to or below "
-            f"the healthy-machine average of {torque_mean:.1f} Nm."
-        )
-    )
+    machine_shap_values = machine_shap
 
 
-# ----- Rotational speed -----
-
-speed_mean = healthy_data["Rotational speed [rpm]"].mean()
-speed_std = healthy_data["Rotational speed [rpm]"].std()
-
-if rotational_speed < speed_mean - speed_std:
-    risk_factors.append(
-        (
-            "🔴",
-            "Low rotational speed",
-            f"Speed is {rotational_speed} rpm, noticeably below "
-            f"the typical healthy-machine level of "
-            f"{speed_mean:.0f} rpm."
-        )
-    )
-elif rotational_speed < speed_mean:
-    risk_factors.append(
-        (
-            "🟠",
-            "Below-average rotational speed",
-            f"Speed is {rotational_speed} rpm, below the healthy-"
-            f"machine average of {speed_mean:.0f} rpm."
-        )
-    )
-else:
-    risk_factors.append(
-        (
-            "🟢",
-            "Rotational speed within typical range",
-            f"Speed is {rotational_speed} rpm, around or above "
-            f"the healthy-machine average."
-        )
-    )
+# Select the failure-class SHAP values
+machine_shap_values = machine_shap_values[:, :, 1]
 
 
-# ----- Tool wear -----
+# Create explanation table
+explanation = pd.DataFrame(
+    {
+        "Feature": machine_data.columns,
+        "SHAP value": machine_shap_values[0],
+    }
+)
 
-wear_mean = healthy_data["Tool wear [min]"].mean()
-wear_std = healthy_data["Tool wear [min]"].std()
+explanation["Absolute SHAP"] = explanation["SHAP value"].abs()
 
-if tool_wear > wear_mean + wear_std:
-    risk_factors.append(
-        (
-            "🔴",
-            "High tool wear",
-            f"Tool wear is {tool_wear} min, substantially above "
-            f"the healthy-machine average of {wear_mean:.0f} min."
-        )
-    )
-elif tool_wear > wear_mean:
-    risk_factors.append(
-        (
-            "🟠",
-            "Elevated tool wear",
-            f"Tool wear is {tool_wear} min, above the healthy-"
-            f"machine average of {wear_mean:.0f} min."
-        )
-    )
-else:
-    risk_factors.append(
-        (
-            "🟢",
-            "Tool wear within typical range",
-            f"Tool wear is {tool_wear} min, around or below "
-            f"the healthy-machine average."
-        )
-    )
+explanation = explanation.sort_values(
+    "Absolute SHAP",
+    ascending=False
+)
 
 
-# ----- Air temperature -----
+# Display the strongest contributors
+st.markdown("**Top contributing factors**")
 
-air_mean = healthy_data["Air temperature [K]"].mean()
-air_std = healthy_data["Air temperature [K]"].std()
+for _, row in explanation.head(4).iterrows():
 
-if air_temperature > air_mean + air_std:
-    risk_factors.append(
-        (
-            "🟠",
-            "Elevated air temperature",
-            f"Air temperature is {air_temperature:.1f} K, "
-            f"above the typical healthy-machine level."
-        )
-    )
-else:
-    risk_factors.append(
-        (
-            "🟢",
-            "Air temperature within typical range",
-            f"Air temperature is {air_temperature:.1f} K."
-        )
-    )
+    feature = row["Feature"]
+    shap_value = row["SHAP value"]
 
-
-# ---------------------------------------------------------
-# Display risk indicators
-# ---------------------------------------------------------
-
-for icon, title, description in risk_factors:
-    if icon == "🔴":
-        st.error(f"**{title}** — {description}")
-    elif icon == "🟠":
-        st.warning(f"**{title}** — {description}")
+    if shap_value > 0:
+        icon = "🔴"
+        direction = "increased"
     else:
-        st.success(f"**{title}** — {description}")
+        icon = "🟢"
+        direction = "reduced"
 
+    if feature == "Torque [Nm]":
+        value = f"{torque:.1f} Nm"
+    elif feature == "Rotational speed [rpm]":
+        value = f"{rotational_speed} rpm"
+    elif feature == "Tool wear [min]":
+        value = f"{tool_wear} min"
+    elif feature == "Air temperature [K]":
+        value = f"{air_temperature:.1f} K"
+    elif feature == "Process temperature [K]":
+        value = f"{process_temperature:.1f} K"
+    elif feature == "Type_L":
+        value = "Type L"
+    elif feature == "Type_M":
+        value = "Type M"
+    else:
+        value = "current machine condition"
+
+    st.markdown(
+        f"{icon} **{feature}** ({value}) — "
+        f"{direction} the model's failure prediction."
+    )
+
+# ---------------------------------------------------------
+# Local SHAP contribution chart
+# ---------------------------------------------------------
+
+import matplotlib.pyplot as plt
+
+st.markdown("**Model contribution by feature**")
+
+chart_data = explanation[
+    ["Feature", "SHAP value"]
+].copy()
+
+chart_data = chart_data.sort_values("SHAP value")
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+
+ax.barh(
+    chart_data["Feature"],
+    chart_data["SHAP value"]
+)
+
+ax.axvline(
+    0,
+    linewidth=1
+)
+
+ax.set_xlabel("SHAP contribution")
+ax.set_ylabel("Feature")
+
+ax.set_title(
+    "How each feature influenced this prediction"
+)
+
+plt.tight_layout()
+
+st.pyplot(fig)
+
+plt.close(fig)	
 
 # ---------------------------------------------------------
 # Maintenance recommendation
@@ -380,24 +367,71 @@ for icon, title, description in risk_factors:
 
 st.subheader("Maintenance Recommendation")
 
+
+# Get the strongest positive SHAP contributors
+positive_contributors = explanation[
+    explanation["SHAP value"] > 0
+].head(3)
+
+
+# Convert feature names into maintenance-friendly labels
+maintenance_labels = {
+    "Torque [Nm]": "torque",
+    "Rotational speed [rpm]": "rotational speed",
+    "Tool wear [min]": "tool wear",
+    "Air temperature [K]": "air temperature",
+    "Process temperature [K]": "process temperature",
+    "Type_L": "machine type",
+    "Type_M": "machine type"
+}
+
+
+contributors = [
+    maintenance_labels.get(feature, feature)
+    for feature in positive_contributors["Feature"]
+]
+
+
 if risk_level == "HIGH":
-    st.error(
-        "Immediate inspection recommended. Focus on torque, "
-        "rotational speed, and tool wear before continued operation."
-    )
+
+    if contributors:
+        focus_areas = ", ".join(contributors)
+
+        st.error(
+            f"Immediate inspection recommended. "
+            f"The strongest model contributors for this machine "
+            f"are {focus_areas}."
+        )
+    else:
+        st.error(
+            "Immediate inspection recommended based on the "
+            "current predicted failure risk."
+        )
+
+
 elif risk_level == "MEDIUM":
-    st.warning(
-        "Continue monitoring the machine closely. Inspect "
-        "torque, rotational speed, and tool wear if the risk "
-        "continues to increase."
-    )
+
+    if contributors:
+        focus_areas = ", ".join(contributors)
+
+        st.warning(
+            f"Continue monitoring the machine closely. "
+            f"The strongest positive model contributors are "
+            f"{focus_areas}."
+        )
+    else:
+        st.warning(
+            "Continue monitoring the machine closely as the "
+            "predicted failure risk is elevated."
+        )
+
+
 else:
+
     st.success(
         "The machine currently shows low predicted failure risk. "
         "Continue normal monitoring and scheduled maintenance."
     )
-
-
 # ---------------------------------------------------------
 # Global model feature importance
 # ---------------------------------------------------------
