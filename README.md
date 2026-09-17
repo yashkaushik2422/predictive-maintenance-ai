@@ -108,6 +108,14 @@ The Streamlit app lets users enter machine operating conditions and interactivel
 - Dataset-level failure statistics
 - Average machine conditions by outcome
 
+**Prediction view** — failure probability, risk level, and the top SHAP factors behind the current prediction:
+
+![Dashboard prediction view](images/dashboard-prediction.png)
+
+**Feature importance & dataset overview** — global model behavior alongside training data statistics:
+
+![Dashboard feature importance view](images/dashboard-feature-importance.png)
+
 Run it with:
 
 ```bash
